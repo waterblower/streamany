@@ -80,4 +80,3 @@ function ServerItem(d: { id: 1 | 2; server: string; key: string }) {
         </form>
     );
 }
-
