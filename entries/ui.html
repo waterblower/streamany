@@ -1,161 +1,202 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>转播配置</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f9f9f9;
-            color: #333;
-            line-height: 1.6;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-            padding: 20px;
-        }
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>转播配置</title>
+        <style>
+            body {
+                font-family:
+                    "Segoe UI",
+                    Tahoma,
+                    Geneva,
+                    Verdana,
+                    sans-serif;
+                background-color: #f9f9f9;
+                color: #333;
+                line-height: 1.6;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+                margin: 0;
+                padding: 20px;
+            }
 
-        .container {
-            background-color: white;
-            border-radius: 12px;
-            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
-            padding: 40px;
-            width: 100%;
-            max-width: 500px;
-        }
+            .container {
+                background-color: white;
+                border-radius: 12px;
+                box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
+                padding: 40px;
+                width: 100%;
+                max-width: 500px;
+            }
 
-        h1 {
-            text-align: center;
-            color: #4a6fa5;
-            margin-bottom: 30px;
-            font-weight: 600;
-        }
+            h1 {
+                text-align: center;
+                color: #4a6fa5;
+                margin-bottom: 30px;
+                font-weight: 600;
+            }
 
-        .section-number {
-            color: #4a6fa5;
-            font-size: 18px;
-            margin-bottom: 15px;
-            font-weight: 600;
-        }
+            .section-number {
+                color: #4a6fa5;
+                font-size: 18px;
+                margin-bottom: 15px;
+                font-weight: 600;
+            }
 
-        .form-group {
-            display: flex;
-            margin-bottom: 25px;
-            gap: 15px;
-        }
+            .form-group {
+                display: flex;
+                margin-bottom: 25px;
+                gap: 15px;
+            }
 
-        .input-group {
-            flex: 1;
-        }
+            .input-group {
+                flex: 1;
+            }
 
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 500;
-            color: #555;
-        }
+            label {
+                display: block;
+                margin-bottom: 8px;
+                font-weight: 500;
+                color: #555;
+            }
 
-        input {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #e0e0e0;
-            border-radius: 6px;
-            font-size: 16px;
-            transition: border-color 0.3s ease;
-            box-sizing: border-box;
-        }
+            input {
+                width: 100%;
+                padding: 12px;
+                border: 1px solid #e0e0e0;
+                border-radius: 6px;
+                font-size: 16px;
+                transition: border-color 0.3s ease;
+                box-sizing: border-box;
+            }
 
-        input:focus {
-            outline: none;
-            border-color: #4a6fa5;
-            box-shadow: 0 0 0 3px rgba(74, 111, 165, 0.1);
-        }
+            input:focus {
+                outline: none;
+                border-color: #4a6fa5;
+                box-shadow: 0 0 0 3px rgba(74, 111, 165, 0.1);
+            }
 
-        .submit-btn {
-            display: block;
-            width: 100%;
-            background-color: #4a6fa5;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            padding: 14px;
-            font-size: 18px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background-color 0.3s ease, transform 0.2s ease;
-            margin-top: 15px;
-        }
+            .submit-btn {
+                display: block;
+                width: 100%;
+                background-color: #4a6fa5;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 14px;
+                font-size: 18px;
+                font-weight: 500;
+                cursor: pointer;
+                transition: background-color 0.3s ease, transform 0.2s ease;
+                margin-top: 15px;
+            }
 
-        .submit-btn:hover {
-            background-color: #3a5a8a;
-            transform: translateY(-2px);
-        }
+            .submit-btn:hover {
+                background-color: #3a5a8a;
+                transform: translateY(-2px);
+            }
 
-        .submit-btn:active {
-            transform: translateY(0);
-        }
+            .submit-btn:active {
+                transform: translateY(0);
+            }
 
-        .form-divider {
-            height: 1px;
-            background-color: #f0f0f0;
-            margin: 30px 0;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>转播配置</h1>
+            .form-divider {
+                height: 1px;
+                background-color: #f0f0f0;
+                margin: 30px 0;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>转播配置</h1>
 
-        <form action="#" method="post">
-            <!-- First pair of inputs -->
-            <h2 class="section-number">平台1</h2>
-            <div class="form-group">
-                <div class="input-group">
-                    <label for="firstName">服务器地址</label>
-                    <input type="text" id="firstName" name="firstName" placeholder="Enter first name" required>
+            <form action="#" method="post">
+                <!-- First pair of inputs -->
+                <h2 class="section-number">平台1</h2>
+                <div class="form-group">
+                    <div class="input-group">
+                        <label for="firstName">服务器地址</label>
+                        <input
+                            type="text"
+                            id="firstName"
+                            name="firstName"
+                            placeholder="Enter first name"
+                            required
+                        >
+                    </div>
+                    <div class="input-group">
+                        <label for="lastName">直播码</label>
+                        <input
+                            type="text"
+                            id="lastName"
+                            name="lastName"
+                            placeholder="Enter last name"
+                            required
+                        >
+                    </div>
                 </div>
-                <div class="input-group">
-                    <label for="lastName">直播码</label>
-                    <input type="text" id="lastName" name="lastName" placeholder="Enter last name" required>
-                </div>
-            </div>
 
-            <div class="form-divider"></div>
+                <div class="form-divider"></div>
 
-            <!-- Second pair of inputs -->
-            <h2 class="section-number">平台2</h2>
-            <div class="form-group">
-                <div class="input-group">
-                    <label for="email">服务器地址</label>
-                    <input type="email" id="email" name="email" placeholder="Enter email address" required>
+                <!-- Second pair of inputs -->
+                <h2 class="section-number">平台2</h2>
+                <div class="form-group">
+                    <div class="input-group">
+                        <label for="email">服务器地址</label>
+                        <input
+                            type="email"
+                            id="email"
+                            name="email"
+                            placeholder="Enter email address"
+                            required
+                        >
+                    </div>
+                    <div class="input-group">
+                        <label for="phone">直播码</label>
+                        <input
+                            type="tel"
+                            id="phone"
+                            name="phone"
+                            placeholder="Enter phone number"
+                            required
+                        >
+                    </div>
                 </div>
-                <div class="input-group">
-                    <label for="phone">直播码</label>
-                    <input type="tel" id="phone" name="phone" placeholder="Enter phone number" required>
-                </div>
-            </div>
 
-            <div class="form-divider"></div>
+                <div class="form-divider"></div>
 
-            <!-- Third pair of inputs -->
-            <h2 class="section-number">平台3</h2>
-            <div class="form-group">
-                <div class="input-group">
-                    <label for="company">服务器地址</label>
-                    <input type="text" id="company" name="company" placeholder="Enter company name" required>
+                <!-- Third pair of inputs -->
+                <h2 class="section-number">平台3</h2>
+                <div class="form-group">
+                    <div class="input-group">
+                        <label for="company">服务器地址</label>
+                        <input
+                            type="text"
+                            id="company"
+                            name="company"
+                            placeholder="Enter company name"
+                            required
+                        >
+                    </div>
+                    <div class="input-group">
+                        <label for="position">直播码</label>
+                        <input
+                            type="text"
+                            id="position"
+                            name="position"
+                            placeholder="Enter position"
+                            required
+                        >
+                    </div>
                 </div>
-                <div class="input-group">
-                    <label for="position">直播码</label>
-                    <input type="text" id="position" name="position" placeholder="Enter position" required>
-                </div>
-            </div>
 
-            <!-- Submit button -->
-            <button type="submit" class="submit-btn">确定</button>
-        </form>
-    </div>
-</body>
+                <!-- Submit button -->
+                <button type="submit" class="submit-btn">确定</button>
+            </form>
+        </div>
+    </body>
 </html>

@@ -31,3 +31,6 @@ cli:
 		--allow-ffi \
 		--allow-net \
 		entries/cli.ts
+
+fresh:
+	cd entries/fresh && deno task preview

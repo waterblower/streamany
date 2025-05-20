@@ -4,7 +4,11 @@
     },
     "compilerOptions": {
         "jsxFactory": "h",
-        "jsxFragmentFactory": "Fragment"
+        "jsxFragmentFactory": "Fragment",
+        "lib": [
+            "deno.unstable",
+            "deno.window"
+        ]
     },
     "imports": {
         "nano-jsx": "https://deno.land/x/nano_jsx@v0.1.0/index.ts"
