@@ -21,7 +21,7 @@ build-cli:
 		--allow-env=HOME,PLUGIN_URL,DENO_DIR \
 		--allow-net \
 		--include assets/ffmpeg-mac \
-		-o build/cli \
+		-o build/streamany \
 		entries/cli.ts
 
 cli:

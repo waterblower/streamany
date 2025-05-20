@@ -1,4 +1,4 @@
-import { run_ffmpeg } from "../core/relay.ts";
+import { run_ffmpeg, setup_ffmpeg_binary } from "../core/relay.ts";
 import { parseArgs } from "jsr:@std/cli/parse-args";
 
 const item1: {
@@ -17,13 +17,20 @@ const item2: {
     server: "",
 };
 
+// parse cli arguments
 const cli_args = parseArgs(Deno.args);
 console.log("cli args", cli_args);
 
 const config_path = cli_args["c"] as string;
+if(!config_path) {
+    console.error("-c config is not provided")
+    Deno.exit(1);
+}
 const config_file = await Deno.readTextFile(config_path);
 const config_obj = JSON.parse(config_file) as { server: string; key: string }[];
 
+//
+await setup_ffmpeg_binary()
 const child_process = await run_ffmpeg(config_obj);
 if (child_process instanceof Error) {
     console.error(child_process);
