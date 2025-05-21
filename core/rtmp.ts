@@ -145,7 +145,7 @@ type MessageHeader = {
     timestamp: number;
     message_length: number;
     message_type_id: number;
-    message_stream_id: number;
+    message_stream_id: number;  // 4 bytes
 } | {
     type: FMT.Type1;
     timestamp: number;
@@ -229,11 +229,6 @@ async function readMessageHeader(conn: Deno.TcpConn, fmt: FMT) {
             message_type_id: message_type_id[0],
             message_stream_id: byte_4_to_number(message_stream_id),
         };
-
-        console.log("timestamp", timestamp);
-        console.log("message_len", message_len);
-        console.log("message_type_id", message_type_id);
-        console.log("message_stream_id", message_stream_id);
     } else if (fmt == FMT.Type1) {
         const header = await read(conn, 7);
         if (header == null) throw "";
