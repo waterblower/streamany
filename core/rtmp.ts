@@ -2,7 +2,7 @@ import { equals } from "jsr:@std/bytes/equals";
 import { assertEquals, assertNotEquals } from "jsr:@std/assert";
 import { messagesFromChunks } from "./messages.ts";
 
-enum FMT {
+export enum FMT {
     Type0 = 0,
     Type1 = 1,
     Type2 = 2,
@@ -19,8 +19,7 @@ let currentChunkSize = 128;
 async function* chunkStream(conn: Deno.TcpConn, chunkSize: number) {
     for (let i = 0; i < 10; i++) {
         console.log("readChunk: begin------------", i);
-        const chunk = await readChunk(conn, currentChunkSize);
-        console.log("readChunk: done", i, chunk.header, chunk.data?.length);
+        const chunk = await readChunk(conn, chunkSize);
         yield chunk;
     }
 }
@@ -108,7 +107,8 @@ for await (const conn of listener) {
     console.log("Handshake Done");
 
     const chunks = chunkStream(conn, currentChunkSize);
-    await messagesFromChunks(chunks);
+    for await (const message of messagesFromChunks(chunks)) {
+    }
 }
 
 async function readChunk(
@@ -131,7 +131,7 @@ async function readChunk(
 
 export type Chunk = {
     header: ChunkHeader;
-    data: Uint8Array | undefined;
+    data: Uint8Array;
 };
 
 type ChunkHeader = {
@@ -145,7 +145,7 @@ type MessageHeader = {
     timestamp: number;
     message_length: number;
     message_type_id: number;
-    message_stream_id: number;  // 4 bytes
+    message_stream_id: number; // 4 bytes
 } | {
     type: FMT.Type1;
     timestamp: number;
@@ -277,12 +277,12 @@ function byteToBinaryString(byte: ArrayBuffer) {
 //   return bytes[0] | (bytes[1] << 8) | (bytes[2] << 16);
 // }
 
-function byte_3_to_number(bytes: Uint8Array) {
+export function byte_3_to_number(bytes: Uint8Array) {
     assertEquals(bytes.length, 3);
     return (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
 }
 
-function byte_4_to_number(bytes: Uint8Array) {
+export function byte_4_to_number(bytes: Uint8Array) {
     assertEquals(bytes.length, 4);
     return (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
 }
