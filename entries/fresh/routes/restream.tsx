@@ -11,7 +11,7 @@ export interface Item {
 
 export const handler: Handlers<Item[]> = {
     async GET(req, ctx) {
-        const data = await get_relay_config()
+        const data = await get_relay_config();
         // Render the page with the data
         return ctx.render(data);
     },

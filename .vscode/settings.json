@@ -1,4 +1,11 @@
 {
     "deno.enable": true,
-    "deno.unstable": ["kv"]
+    "deno.unstable": ["kv"],
+    "chat.agent.enabled": false,
+    "github.copilot.enable": {
+        "*": false,
+        "plaintext": false,
+        "markdown": false,
+        "scminput": false
+    }
 }

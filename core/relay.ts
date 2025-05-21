@@ -1,7 +1,6 @@
 import * as path from "jsr:@std/path";
 import { exec } from "https://deno.land/x/exec/mod.ts";
 
-
 const VERSION = "0.0.1";
 const ffmpeg = await Deno.readFile(
     path.join(import.meta.dirname || "./", "/../assets/ffmpeg-mac"),
@@ -31,9 +30,9 @@ export async function setup_ffmpeg_binary() {
     await Deno.writeFile(ffmpeg_path, ffmpeg, {
         mode: 0o777,
     });
-    console.log("successfully setup ffmpeg at", ffmpeg_path)
+    console.log("successfully setup ffmpeg at", ffmpeg_path);
     await exec(`ls -l ${ffmpeg_path}`);
-    return ffmpeg_path
+    return ffmpeg_path;
 }
 
 export async function run_ffmpeg(ffmpeg_path: string, data: Item[]) {
@@ -49,10 +48,16 @@ export async function run_ffmpeg(ffmpeg_path: string, data: Item[]) {
     ];
 
     for (const item of data) {
-        if(item.server) {
-            const url = parseURL(item.server)
-            if(url instanceof URL && url.protocol == "rtmp:") {
-                args.push("-c", "copy", "-f", "flv", `${item.server}/${item.key}`);
+        if (item.server) {
+            const url = parseURL(item.server);
+            if (url instanceof URL && url.protocol == "rtmp:") {
+                args.push(
+                    "-c",
+                    "copy",
+                    "-f",
+                    "flv",
+                    `${item.server}/${item.key}`,
+                );
             }
         }
     }
@@ -72,9 +77,9 @@ export async function run_ffmpeg(ffmpeg_path: string, data: Item[]) {
 }
 
 type Item = {
-    server: string,
-    key: string
-}
+    server: string;
+    key: string;
+};
 
 export async function get_relay_config() {
     const kv = await Deno.openKv();
@@ -103,13 +108,13 @@ export async function get_relay_config() {
     }];
 
     kv.close();
-    return data
+    return data;
 }
 
 function parseURL(url: string) {
     try {
-        return new URL(url)
+        return new URL(url);
     } catch (e) {
-        return e as Error
+        return e as Error;
     }
 }

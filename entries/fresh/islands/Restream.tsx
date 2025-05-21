@@ -54,7 +54,11 @@ export function RestreamConfig(props: { data: Item[] }) {
                     class={`w-full bg-blue-600
                         text-white font-medium py-3 px-4 rounded-md
                         transition duration-300 ease-in-out transform
-                        mt-6 ${relayIsRunning.value? "": "hover:-translate-y-1 hover:shadow-md hover:bg-blue-700"}`}
+                        mt-6 ${
+                        relayIsRunning.value
+                            ? ""
+                            : "hover:-translate-y-1 hover:shadow-md hover:bg-blue-700"
+                    }`}
                 >
                     开启转播器
                 </button>
@@ -118,18 +122,19 @@ const submitTheForm = (data: Item[]) => async () => {
     });
 };
 
-const startTheRelay = (data: Item[], relayIsRunning: Signal<boolean>) => async () => {
-    const res = await fetch("/api/startTheRelay", {
-        method: "POST",
-        body: JSON.stringify({
-            item1: data[0],
-            item2: data[1],
-            item3: data[2],
-        }),
-    });
-    if(res.status != 200) {
-        relayIsRunning.value = false;
-    }
-    relayIsRunning.value = true
-    console.log("relayIsRunning", relayIsRunning.value)
-};
+const startTheRelay =
+    (data: Item[], relayIsRunning: Signal<boolean>) => async () => {
+        const res = await fetch("/api/startTheRelay", {
+            method: "POST",
+            body: JSON.stringify({
+                item1: data[0],
+                item2: data[1],
+                item3: data[2],
+            }),
+        });
+        if (res.status != 200) {
+            relayIsRunning.value = false;
+        }
+        relayIsRunning.value = true;
+        console.log("relayIsRunning", relayIsRunning.value);
+    };

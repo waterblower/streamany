@@ -1,3 +1,10 @@
+rtmp:
+	deno run --allow-net core/rtmp.ts
+
+test:
+	./assets/ffmpeg-mac -re -i assets/test2.mp4 \
+	    -c copy -f flv rtmp://localhost:1935
+
 build:
 	deno compile \
 		--allow-read --allow-write --allow-run --allow-ffi \
