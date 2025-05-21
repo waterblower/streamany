@@ -1,5 +1,6 @@
 import { equals } from "jsr:@std/bytes/equals";
 import { assertEquals, assertNotEquals } from "jsr:@std/assert";
+import { messagesFromChunks } from "./messages.ts";
 
 enum FMT {
     Type0 = 0,
@@ -13,6 +14,17 @@ const listener = Deno.listen({
     hostname: "localhost",
 });
 console.log("listening at", listener.addr);
+
+let currentChunkSize = 128;
+async function* chunkStream(conn: Deno.TcpConn, chunkSize: number) {
+    for (let i = 0; i < 10; i++) {
+        console.log("readChunk: begin------------", i);
+        const chunk = await readChunk(conn, currentChunkSize);
+        console.log("readChunk: done", i, chunk.header, chunk.data?.length);
+        yield chunk;
+    }
+}
+
 for await (const conn of listener) {
     // https://rtmp.veriskope.com/docs/spec/#522c0-and-s0-format
 
@@ -95,70 +107,36 @@ for await (const conn of listener) {
 
     console.log("Handshake Done");
 
-    const chunk = await readChunk(conn);
-    console.log(chunk.header)
+    const chunks = chunkStream(conn, currentChunkSize);
+    await messagesFromChunks(chunks);
 }
 
-async function readChunk(conn: Deno.TcpConn): Promise<Chunk> {
-    console.log("Read Chunk");
+async function readChunk(
+    conn: Deno.TcpConn,
+    chunkSize: number,
+): Promise<Chunk> {
+    console.log("readChunk: begin");
     const chunk_header = await readChunkHeader(conn);
-    let message: undefined | Uint8Array
+    console.log("readChunkHeader: Done");
 
-    console.log("chunk_header.message_header.type", chunk_header.message_header.type)
-    if (chunk_header.message_header.type == FMT.Type0) {
-        const len = chunk_header.message_header.message_length
-        const data = await read(conn, len)
-        if (data == null) throw ""
-        message = data
-    } else if (chunk_header.message_header.type == FMT.Type1) {
-        const len = chunk_header.message_header.message_length
-        const data = await read(conn, len)
-        if (data == null) throw ""
-        message = data
-    } else if (chunk_header.message_header.type == FMT.Type2) {
-
-    } else if (chunk_header.message_header.type == FMT.Type3) {
-
-    }
+    // read chunk data
+    const message = await read(conn, chunkSize);
+    if (message == null) throw "readChunk: no chunk data";
 
     return {
         header: chunk_header,
-        data: message
-    }
-
-    // https://rtmp.veriskope.com/docs/spec/#54-protocol-control-messages
-    // if (
-    //     chunk_stream_id == 1 ||
-    //     chunk_stream_id == 2 ||
-    //     chunk_stream_id == 3 ||
-    //     chunk_stream_id == 5 ||
-    //     chunk_stream_id == 6
-    // ) {
-    //     console.log("read protocol-control-messages");
-    //     if (chunk_stream_id == 3) {
-    //         const sequence_number = await read(conn, 4);
-    //         if (sequence_number == null) throw "";
-    //         console.log(
-    //             sequence_number,
-    //             new DataView(sequence_number.buffer).getUint32(0, true),
-    //             new DataView(sequence_number.buffer).getUint32(0, false),
-    //         );
-    //         const xx = await read(conn, 1024 * 1024 * 1024);
-    //         console.log("length", xx?.length);
-    //     } else {
-    //         throw "not implemented";
-    //     }
-    // }
+        data: message,
+    };
 }
 
-type Chunk = {
-    header: ChunkHeader,
-    data: Uint8Array | undefined
-}
+export type Chunk = {
+    header: ChunkHeader;
+    data: Uint8Array | undefined;
+};
 
 type ChunkHeader = {
-    chunk_stream_id: number;    // basic header
-    message_header: MessageHeader
+    chunk_stream_id: number; // basic header
+    message_header: MessageHeader;
     extended_timestamp: number | undefined;
 };
 
@@ -185,21 +163,25 @@ async function readChunkHeader(conn: Deno.TcpConn): Promise<ChunkHeader> {
     Chunking https://rtmp.veriskope.com/docs/spec/#531chunk-format
     */
     // read Chunk Basic Header
-    const {fmt, chunk_stream_id} = await readBasicHeader(conn)
-    const messageHeader = await readMessageHeader(conn, fmt)
+    const { fmt, chunk_stream_id } = await readBasicHeader(conn);
+    console.log("readBasicHeader: done");
+    const message_header = await readMessageHeader(conn, fmt);
+    console.log("readMessageHeader: done");
 
     // https://rtmp.veriskope.com/docs/spec/#5313-extended-timestamp
     // should parse Extended Timestamp?
-    const extended_timestamp: undefined | number
-    if (equals(timestamp, new Uint8Array([0xff, 0xff, 0xff]))) {
-        throw "not implemented";
+    const extended_timestamp: undefined | number = undefined;
+    if (message_header.type != FMT.Type3) {
+        if (message_header.timestamp == 0xffffff) {
+            throw "not implemented";
+        }
     }
 
     return {
         chunk_stream_id,
         extended_timestamp,
-        message_header
-    }
+        message_header,
+    };
 }
 
 async function readBasicHeader(conn: Deno.TcpConn) {
@@ -210,26 +192,31 @@ async function readBasicHeader(conn: Deno.TcpConn) {
     // console.log(byteToBinaryString(header_1[0]));
 
     let chunk_stream_id = header_1[0];
-    const fmt: FMT = header_1[0] & 0b1100_0000;
+
+    const fmt: FMT = header_1[0] >> 6;
+    console.log("fmt is", fmt, header_1[0]);
     if (header_1[0] == 0) { // 2 bytes
     } else if (header_1[0] == 1) { // 3 bytes
     } else { // 1 byte
         chunk_stream_id = header_1[0] & 0b0011_1111;
     }
     console.log("fmt:", fmt, "chunk_stream_id:", chunk_stream_id);
-    return {fmt, chunk_stream_id}
+    return { fmt, chunk_stream_id };
 }
 
 async function readMessageHeader(conn: Deno.TcpConn, fmt: FMT) {
-/**
-    read Chunk Message Header
-    https://rtmp.veriskope.com/docs/spec/#5312-chunk-message-header
-    */
-    let message_header: MessageHeader
+    /**
+        read Chunk Message Header
+        https://rtmp.veriskope.com/docs/spec/#5312-chunk-message-header
+        */
+    let message_header: MessageHeader;
     let timestamp: Uint8Array = new Uint8Array([0xff, 0xff, 0xff]);
     if (fmt == FMT.Type0) {
+        console.log("fmt", fmt);
         const header = await read(conn, 11);
         if (header == null) throw "";
+
+        console.log("!");
         const timestamp = header.slice(0, 3);
         const message_len = header.slice(3, 6);
         const message_type_id = header.slice(6, 7);
@@ -253,14 +240,27 @@ async function readMessageHeader(conn: Deno.TcpConn, fmt: FMT) {
         timestamp = header.slice(0, 3);
         const message_len = header.slice(3, 6);
         const message_type_id = header.slice(6, 7);
+        message_header = {
+            type: fmt,
+            timestamp: byte_3_to_number(timestamp),
+            message_length: byte_3_to_number(message_len),
+            message_type_id: message_type_id[0],
+        };
     } else if (fmt == FMT.Type2) {
         const header = await read(conn, 7);
         if (header == null) throw "";
         timestamp = header.slice(0, 3);
+        message_header = {
+            type: fmt,
+            timestamp: byte_3_to_number(timestamp),
+        };
     } else {
+        message_header = {
+            type: fmt,
+        };
         console.log(fmt, "no Chunk Message Header");
     }
-    return message_header
+    return message_header;
 }
 
 async function read(conn: Deno.TcpConn, size: number) {
@@ -274,6 +274,7 @@ async function read(conn: Deno.TcpConn, size: number) {
 
 function byteToBinaryString(byte: ArrayBuffer) {
     // Ensure the value is treated as 8 bits
+    // @ts-ignore
     return byte.toString(2).padStart(8, "0");
 }
 
@@ -282,11 +283,11 @@ function byteToBinaryString(byte: ArrayBuffer) {
 // }
 
 function byte_3_to_number(bytes: Uint8Array) {
-    assertEquals(bytes.length, 3)
+    assertEquals(bytes.length, 3);
     return (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
 }
 
 function byte_4_to_number(bytes: Uint8Array) {
-    assertEquals(bytes.length, 4)
+    assertEquals(bytes.length, 4);
     return (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
 }
