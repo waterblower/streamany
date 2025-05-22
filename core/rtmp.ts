@@ -2,6 +2,13 @@ import { equals } from "jsr:@std/bytes/equals";
 import { assertEquals, assertNotEquals } from "jsr:@std/assert";
 import { handleMessage, messagesFromChunks, MessageType } from "./messages.ts";
 
+const chunkStreamStates = new Map<number, {
+    messageLength: number;
+    messageTypeId: number;
+    messageStreamId: number;
+    timestamp: number;
+}>();
+
 export enum FMT {
     Type0 = 0,
     Type1 = 1,
@@ -23,7 +30,7 @@ async function* chunkStream(
     let i = 0;
     while (true) {
         console.log("readChunk: begin------------", i++);
-        const chunk = await readChunk(conn, chunkSizeRef);
+        const chunk = await readChunk(conn, chunkSizeRef, chunkStreamStates);
         if (!chunk) {
             console.log("No chunk received, connection may be closed");
             break;
@@ -127,35 +134,90 @@ for await (const conn of listener) {
     }
 }
 
+// todo: don't use module level global state
+
 async function readChunk(
     conn: Deno.TcpConn,
     chunkSizeRef: { value: number },
+    chunkStreamStates: Map<number, {
+        messageLength: number;
+        messageTypeId: number;
+        messageStreamId: number;
+        timestamp: number;
+    }>,
 ): Promise<Chunk | null> {
-    console.log("readChunk: begin");
-    const chunk_header = await readChunkHeader(conn);
-    console.log("readChunkHeader: Done");
+    try {
+        console.log("readChunk: begin");
+        const chunk_header = await readChunkHeader(conn);
+        console.log("readChunkHeader: Done");
 
-    // Determine the actual size to read
-    // For Type 0 chunks, use the message length if it's smaller than the chunk size
-    let sizeToRead = chunkSizeRef.value;
-    if (
-        chunk_header.message_header.type === FMT.Type0 &&
-        chunk_header.message_header.message_length < chunkSizeRef.value
-    ) {
-        sizeToRead = chunk_header.message_header.message_length;
-    }
+        // Get or create the state for this chunk stream
+        let state = chunkStreamStates.get(chunk_header.chunk_stream_id);
 
-    // read chunk data
-    const message = await read(conn, sizeToRead);
-    if (message == null) {
-        console.warn("readChunk: no chunk data");
+        // Update state based on the header type
+        if (chunk_header.message_header.type === FMT.Type0) {
+            // For Type 0, we have a new message, so update all state
+            state = {
+                messageLength: chunk_header.message_header.message_length,
+                messageTypeId: chunk_header.message_header.message_type_id,
+                messageStreamId: chunk_header.message_header.message_stream_id,
+                timestamp: chunk_header.message_header.timestamp,
+            };
+            chunkStreamStates.set(chunk_header.chunk_stream_id, state);
+        } else if (chunk_header.message_header.type === FMT.Type1) {
+            // For Type 1, update length, type ID and timestamp
+            if (state) {
+                state.messageLength =
+                    chunk_header.message_header.message_length;
+                state.messageTypeId =
+                    chunk_header.message_header.message_type_id;
+                state.timestamp = chunk_header.message_header.timestamp;
+            } else {
+                console.warn("Received Type1 chunk without previous state");
+                return null;
+            }
+        } else if (chunk_header.message_header.type === FMT.Type2) {
+            // For Type 2, only update timestamp
+            if (state) {
+                state.timestamp = chunk_header.message_header.timestamp;
+            } else {
+                console.warn("Received Type2 chunk without previous state");
+                return null;
+            }
+        } else if (!state) {
+            // For Type 3, if we have no state, we can't continue
+            console.warn("Received Type3 chunk without previous state");
+            return null;
+        }
+
+        // Determine the actual size to read (using the stored state for Type 1-3)
+        let sizeToRead = chunkSizeRef.value;
+        if (state && state.messageLength < chunkSizeRef.value) {
+            sizeToRead = state.messageLength;
+        }
+
+        // Read chunk data
+        const message = await read(conn, sizeToRead);
+        if (message == null) {
+            console.warn("readChunk: no chunk data");
+            return null;
+        }
+
+        // For Type 1-3, enhance the header with the stored state
+        if (chunk_header.message_header.type !== FMT.Type0 && state) {
+            chunk_header.message_header.message_length = state.messageLength;
+            chunk_header.message_header.message_type_id = state.messageTypeId;
+            chunk_header.message_header.message_stream_id = state.messageStreamId;
+        }
+
+        return {
+            header: chunk_header,
+            data: message,
+        };
+    } catch (error) {
+        console.error("Error reading chunk:", error);
         return null;
     }
-
-    return {
-        header: chunk_header,
-        data: message,
-    };
 }
 
 export type Chunk = {
@@ -170,7 +232,7 @@ type ChunkHeader = {
 };
 
 type MessageHeader = {
-    type: FMT.Type0;
+    type: FMT;
     timestamp: number;
     message_length: number;
     message_type_id: number;
@@ -180,11 +242,18 @@ type MessageHeader = {
     timestamp: number;
     message_length: number;
     message_type_id: number;
+    message_stream_id?: number; // 4 bytes
 } | {
     type: FMT.Type2;
     timestamp: number;
+    message_length?: number;
+    message_type_id?: number;
+    message_stream_id?: number; // 4 bytes
 } | {
     type: FMT.Type3;
+    message_length?: number;
+    message_type_id?: number;
+    message_stream_id?: number; // 4 bytes
 };
 
 async function readChunkHeader(conn: Deno.TcpConn): Promise<ChunkHeader> {
