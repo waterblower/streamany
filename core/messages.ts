@@ -26,10 +26,14 @@ export async function* messagesFromChunks(chunks: AsyncIterable<Chunk>) {
      * At the receiver end, the chunks are assembled into messages
      * based on the chunk stream ID.
      */
-    const messages = new Map<number, {
-        total_length: number;
+    // Track message state for each chunk stream ID
+    const messageStreams = new Map<number, {
+        messageHeader?: MessageHeader;
+        totalLength: number;
+        collectedLength: number;
         chunks: Chunk[];
     }>();
+
     for await (const chunk of chunks) {
         console.log(
             "chunk header:",
@@ -38,50 +42,97 @@ export async function* messagesFromChunks(chunks: AsyncIterable<Chunk>) {
             chunk.data?.length,
         );
 
-        let chunks = messages.get(chunk.header.chunk_stream_id);
-        if (chunks) {
-            chunks.chunks.push(chunk);
-        } else {
-            if (chunk.header.message_header.type == FMT.Type0) {
-                chunks = {
-                    total_length: chunk.header.message_header.message_length,
-                    chunks: [chunk],
-                };
-                messages.set(chunk.header.chunk_stream_id, chunks);
-            } else {
-                throw "impossible";
+        const chunkStreamId = chunk.header.chunk_stream_id;
+        
+        // Get or create message stream tracking object
+        let messageStream = messageStreams.get(chunkStreamId);
+        
+        // Process based on chunk format type
+        if (chunk.header.message_header.type === FMT.Type0) {
+            // Type 0 chunks start new messages
+            const header = chunk.header.message_header;
+            
+            // If we have a pending message, we should yield it first (this shouldn't happen with proper chunking)
+            if (messageStream && messageStream.collectedLength > 0) {
+                const message = assembleMessage(messageStream);
+                if (message) {
+                    yield message;
+                }
             }
+            
+            // Start a new message
+            messageStream = {
+                messageHeader: {
+                    type: header.message_type_id,
+                    payload_length: header.message_length,
+                    timestamp: header.timestamp,
+                    message_stream_id: header.message_stream_id
+                },
+                totalLength: header.message_length,
+                collectedLength: 0,
+                chunks: []
+            };
+            messageStreams.set(chunkStreamId, messageStream);
+        } else if (!messageStream) {
+            // For non-Type0 chunks, we should already have a message stream
+            console.error("Received non-Type0 chunk without prior Type0 chunk for stream:", chunkStreamId);
+            continue;
         }
-        let size = 0;
-        for (const chunk of chunks.chunks) {
-            size += chunk.data.length;
-        }
-        if (size == chunks.total_length) {
-            const message = assembleChunksToMessage(
-                chunks.chunks,
-                chunks.total_length,
-            );
-            console.log("message:", message.length);
-
-            // parse message into object
-            const type = message.slice(0, 1);
-            console.log(message.slice(0, 11));
-            const payload_len = byte_3_to_number(message.slice(1, 4));
-            const timestamp = byte_4_to_number(message.slice(4, 8));
-            const message_stream_id = byte_3_to_number(message.slice(8, 11));
-            const payload = message.slice(11);
-            assertEquals(payload_len, payload.byteLength);
+        
+        // Add chunk to the current message stream
+        messageStream.chunks.push(chunk);
+        messageStream.collectedLength += chunk.data.length;
+        
+        // Check if we've collected a complete message
+        if (messageStream.collectedLength >= messageStream.totalLength) {
+            const message = assembleMessage(messageStream);
+            if (message) {
+                yield message;
+            }
+            
+            // Reset for the next message in this stream
+            messageStreams.set(chunkStreamId, {
+                messageHeader: messageStream.messageHeader,
+                totalLength: 0,
+                collectedLength: 0,
+                chunks: []
+            });
         }
     }
 }
 
-function assembleChunksToMessage(chunks: Chunk[], total_length: number) {
-    const buf = new Uint8Array(total_length);
-    let offset = 0;
-    for (const chunk of chunks) {
-        console.log("chunk.data", chunk.data.length);
-        buf.set(chunk.data, offset);
-        offset += chunk.data.length;
+function assembleMessage(messageStream: {
+    messageHeader?: MessageHeader;
+    totalLength: number;
+    collectedLength: number;
+    chunks: Chunk[];
+}): Message | null {
+    if (!messageStream.messageHeader) {
+        console.error("Cannot assemble message without a header");
+        return null;
     }
-    return buf;
+    
+    // Create buffer for the assembled payload
+    const payload = new Uint8Array(messageStream.totalLength);
+    let offset = 0;
+    
+    // Copy all chunk data into the payload buffer
+    for (const chunk of messageStream.chunks) {
+        const dataToWrite = Math.min(chunk.data.length, messageStream.totalLength - offset);
+        payload.set(chunk.data.subarray(0, dataToWrite), offset);
+        offset += dataToWrite;
+        
+        if (offset >= messageStream.totalLength) {
+            break;
+        }
+    }
+    
+    if (offset !== messageStream.totalLength) {
+        console.warn(`Payload size mismatch: expected ${messageStream.totalLength}, got ${offset}`);
+    }
+    
+    return {
+        header: messageStream.messageHeader,
+        payload
+    };
 }
