@@ -1,6 +1,6 @@
 import { equals } from "jsr:@std/bytes/equals";
 import { assertEquals, assertNotEquals } from "jsr:@std/assert";
-import { messagesFromChunks } from "./messages.ts";
+import { handleMessage, messagesFromChunks, MessageType } from "./messages.ts";
 
 export enum FMT {
     Type0 = 0,
@@ -15,11 +15,19 @@ const listener = Deno.listen({
 });
 console.log("listening at", listener.addr);
 
-let currentChunkSize = 128;
-async function* chunkStream(conn: Deno.TcpConn, chunkSize: number) {
-    for (let i = 0; i < 10; i++) {
-        console.log("readChunk: begin------------", i);
-        const chunk = await readChunk(conn, chunkSize);
+let chunkSizeRef = { value: 128 };
+async function* chunkStream(
+    conn: Deno.TcpConn,
+    chunkSizeRef: { value: number },
+) {
+    let i = 0;
+    while (true) {
+        console.log("readChunk: begin------------", i++);
+        const chunk = await readChunk(conn, chunkSizeRef);
+        if (!chunk) {
+            console.log("No chunk received, connection may be closed");
+            break;
+        }
         yield chunk;
     }
 }
@@ -106,22 +114,39 @@ for await (const conn of listener) {
 
     console.log("Handshake Done");
 
-    const chunks = chunkStream(conn, currentChunkSize);
+    const chunks = chunkStream(conn, chunkSizeRef);
     for await (const message of messagesFromChunks(chunks)) {
+        console.log("Received message:", message.header, message.payload.length);
+
+        // Process the message
+        await handleMessage(conn, message, chunkSizeRef);
     }
 }
 
 async function readChunk(
     conn: Deno.TcpConn,
-    chunkSize: number,
-): Promise<Chunk> {
+    chunkSizeRef: { value: number },
+): Promise<Chunk | null> {
     console.log("readChunk: begin");
     const chunk_header = await readChunkHeader(conn);
     console.log("readChunkHeader: Done");
 
+    // Determine the actual size to read
+    // For Type 0 chunks, use the message length if it's smaller than the chunk size
+    let sizeToRead = chunkSizeRef.value;
+    if (
+        chunk_header.message_header.type === FMT.Type0 &&
+        chunk_header.message_header.message_length < chunkSizeRef.value
+    ) {
+        sizeToRead = chunk_header.message_header.message_length;
+    }
+
     // read chunk data
-    const message = await read(conn, chunkSize);
-    if (message == null) throw "readChunk: no chunk data";
+    const message = await read(conn, sizeToRead);
+    if (message == null) {
+        console.warn("readChunk: no chunk data");
+        return null;
+    }
 
     return {
         header: chunk_header,
