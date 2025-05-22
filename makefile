@@ -2,7 +2,7 @@ rtmp:
 	deno run --allow-net core/rtmp.ts
 
 test:
-	./assets/ffmpeg-mac -re -i assets/test2.mp4 \
+	./assets/ffmpeg-mac -loglevel verbose -re -i assets/test2.mp4 \
 	    -c copy -f mp4 rtmp://localhost:1935
 
 build:
