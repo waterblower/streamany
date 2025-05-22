@@ -116,7 +116,11 @@ for await (const conn of listener) {
 
     const chunks = chunkStream(conn, chunkSizeRef);
     for await (const message of messagesFromChunks(chunks)) {
-        console.log("Received message:", message.header, message.payload.length);
+        console.log(
+            "Received message:",
+            message.header,
+            message.payload.length,
+        );
 
         // Process the message
         await handleMessage(conn, message, chunkSizeRef);

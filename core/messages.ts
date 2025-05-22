@@ -1,5 +1,8 @@
 import { assertEquals } from "jsr:@std/assert/equals";
 import { byte_3_to_number, byte_4_to_number, Chunk, FMT } from "./rtmp.ts";
+// Import AMF0 parsing utilities
+import { encodeAMF0Command, parseAMF0Command } from "./amf.ts";
+import { sendControlMessage, sendMessage } from "./chunk.ts";
 
 export type Message = {
     header: MessageHeader;
@@ -365,9 +368,59 @@ async function sendWindowAcknowledgementSize(
     payload[2] = (windowSize >> 8) & 0xFF;
     payload[3] = windowSize & 0xFF;
 
-    // In a real implementation, you would wrap this in a proper RTMP chunk
-    // For now, we'll just log it
-    console.log(`Sending Window Acknowledgement Size: ${windowSize}`);
+    // Send the message using the chunk utility
+    await sendControlMessage(
+        conn,
+        MessageType.WINDOW_ACKNOWLEDGEMENT_SIZE,
+        payload,
+    );
+
+    console.log(`Sent Window Acknowledgement Size: ${windowSize}`);
+}
+
+/**
+ * Sends a Set Peer Bandwidth message
+ */
+async function sendSetPeerBandwidth(
+    conn: Deno.TcpConn,
+    windowSize: number,
+    limitType: number,
+): Promise<void> {
+    // Create a message with type 6 (Set Peer Bandwidth)
+    const payload = new Uint8Array(5);
+    payload[0] = (windowSize >> 24) & 0xFF;
+    payload[1] = (windowSize >> 16) & 0xFF;
+    payload[2] = (windowSize >> 8) & 0xFF;
+    payload[3] = windowSize & 0xFF;
+    payload[4] = limitType; // 0: Hard, 1: Soft, 2: Dynamic
+
+    // Send the message using the chunk utility
+    await sendControlMessage(conn, MessageType.SET_PEER_BANDWIDTH, payload);
+
+    console.log(`Sent Set Peer Bandwidth: ${windowSize}, type: ${limitType}`);
+}
+
+/**
+ * Sends a Stream Begin user control message
+ */
+async function sendStreamBegin(
+    conn: Deno.TcpConn,
+    streamId: number,
+): Promise<void> {
+    // Create a User Control message with event type 0 (Stream Begin)
+    const payload = new Uint8Array(6);
+    payload[0] = 0; // Event type: Stream Begin (high byte)
+    payload[1] = 0; // Event type: Stream Begin (low byte)
+    payload[2] = (streamId >> 24) & 0xFF;
+    payload[3] = (streamId >> 16) & 0xFF;
+    payload[4] = (streamId >> 8) & 0xFF;
+    payload[5] = streamId & 0xFF;
+
+    // Send the message using the chunk utility
+    const { sendControlMessage } = await import("./chunk.ts");
+    await sendControlMessage(conn, MessageType.USER_CONTROL, payload);
+
+    console.log(`Sent Stream Begin for stream ID: ${streamId}`);
 }
 
 /**
@@ -430,9 +483,17 @@ async function sendPingResponse(
     conn: Deno.TcpConn,
     timestampData: Uint8Array,
 ): Promise<void> {
-    // Create a ping response user control message
-    // In a real implementation, you would wrap this in a proper RTMP chunk
-    console.log("Sending Ping Response");
+    // Create a ping response user control message (event type 7)
+    const payload = new Uint8Array(2 + timestampData.length);
+    payload[0] = 0; // Event type: Ping Response (high byte)
+    payload[1] = 7; // Event type: Ping Response (low byte)
+    payload.set(timestampData, 2);
+
+    // Send the message using the chunk utility
+    const { sendControlMessage } = await import("./chunk.ts");
+    await sendControlMessage(conn, MessageType.USER_CONTROL, payload);
+
+    console.log("Sent Ping Response");
 }
 
 /**
@@ -445,17 +506,315 @@ async function handleCommandMessage(
 ): Promise<void> {
     console.log("Command message received");
 
-    // In a real implementation, you would parse the AMF data
-    // and handle commands like connect, createStream, play, etc.
+    // Parse the command message payload
+    const { commandName, transactionId, commandObject, additionalParams } =
+        parseAMF0Command(message.payload);
 
-    // For example:
-    // const commandName = parseAMFString(message.payload, 0);
-    // console.log(`Command: ${commandName}`);
+    console.log(`Command: ${commandName}, TransactionID: ${transactionId}`);
+    console.log("Command object:", commandObject);
+    console.log("Additional parameters:", additionalParams);
 
-    // Respond based on the command
-    // if (commandName === "connect") {
-    //     sendConnectResponse(conn);
-    // }
+    // Handle different commands
+    switch (commandName) {
+        case "connect":
+            await handleConnectCommand(conn, transactionId, commandObject);
+            break;
+
+        case "createStream":
+            await handleCreateStreamCommand(conn, transactionId);
+            break;
+
+        case "play":
+            await handlePlayCommand(
+                conn,
+                transactionId,
+                commandObject,
+                additionalParams[0] as string,
+            );
+            break;
+
+        case "deleteStream":
+            await handleDeleteStreamCommand(
+                conn,
+                transactionId,
+                additionalParams[0] as number,
+            );
+            break;
+
+        case "closeStream":
+            await handleCloseStreamCommand(conn);
+            break;
+
+        case "releaseStream":
+            await handleReleaseStreamCommand(
+                conn,
+                transactionId,
+                additionalParams[0] as string,
+            );
+            break;
+
+        case "FCPublish":
+            await handleFCPublishCommand(
+                conn,
+                transactionId,
+                additionalParams[0] as string,
+            );
+            break;
+
+        case "publish":
+            await handlePublishCommand(
+                conn,
+                transactionId,
+                additionalParams[0] as string,
+                additionalParams[1] as string,
+            );
+            break;
+
+        default:
+            console.warn(`Unhandled command: ${commandName}`);
+    }
+}
+
+/**
+ * Handle "connect" command
+ * Client requests to connect to the application
+ */
+async function handleConnectCommand(
+    conn: Deno.TcpConn,
+    transactionId: number,
+    commandObject: Record<string, any>,
+): Promise<void> {
+    console.log("Handling connect command");
+
+    // Send Window Acknowledgement Size
+    await sendWindowAcknowledgementSize(conn, 2500000);
+
+    // Send Set Peer Bandwidth
+    await sendSetPeerBandwidth(conn, 2500000, 2);
+
+    // Send Stream Begin user control message
+    await sendStreamBegin(conn, 0);
+
+    // Send _result command
+    const resultCommandObj = {
+        fmsVer: "FMS/3,0,1,123",
+        capabilities: 31,
+        mode: 1,
+    };
+
+    const infoObj = {
+        level: "status",
+        code: "NetConnection.Connect.Success",
+        description: "Connection succeeded.",
+        objectEncoding: commandObject.objectEncoding || 0,
+    };
+
+    console.log("------------");
+
+    await sendCommandAMF0(
+        conn,
+        "_result",
+        transactionId,
+        resultCommandObj,
+        infoObj,
+    );
+
+    console.log("Connect command response sent");
+}
+
+/**
+ * Handle "createStream" command
+ * Client requests to create a new stream
+ */
+async function handleCreateStreamCommand(
+    conn: Deno.TcpConn,
+    transactionId: number,
+): Promise<void> {
+    console.log("Handling createStream command");
+
+    // Import AMF0 encoding utilities
+    const { encodeAMF0Command } = await import("./amf.ts");
+
+    try {
+        // Send _result command with stream ID
+        // For simplicity, we'll use stream ID 1
+        const streamId = 1;
+
+        await sendCommandAMF0(conn, "_result", transactionId, null, streamId);
+
+        console.log(
+            `CreateStream command response sent with stream ID: ${streamId}`,
+        );
+    } catch (error) {
+        console.error("Error handling createStream command:", error);
+    }
+}
+
+/**
+ * Handle "play" command
+ * Client requests to play a stream
+ */
+async function handlePlayCommand(
+    conn: Deno.TcpConn,
+    transactionId: number,
+    commandObject: Record<string, any>,
+    streamName: string,
+): Promise<void> {
+    console.log(`Handling play command for stream: ${streamName}`);
+
+    // Import AMF0 encoding utilities
+    const { encodeAMF0Command } = await import("./amf.ts");
+
+    try {
+        // Send Stream Begin user control message
+        await sendStreamBegin(conn, 1);
+
+        // Send onStatus command for NetStream.Play.Start
+        const infoObj = {
+            level: "status",
+            code: "NetStream.Play.Start",
+            description: `Started playing ${streamName}.`,
+            details: streamName,
+        };
+
+        await sendCommandAMF0(conn, "onStatus", 0, null, infoObj);
+
+        console.log(`Play command response sent for stream: ${streamName}`);
+    } catch (error) {
+        console.error("Error handling play command:", error);
+    }
+}
+
+/**
+ * Handle "deleteStream" command
+ * Client requests to delete a stream
+ */
+async function handleDeleteStreamCommand(
+    conn: Deno.TcpConn,
+    transactionId: number,
+    streamId: number,
+): Promise<void> {
+    console.log(`Handling deleteStream command for stream ID: ${streamId}`);
+
+    // For now, we'll just log it. In a real implementation, you'd clean up resources.
+    console.log(`Stream ${streamId} deleted`);
+}
+
+/**
+ * Handle "closeStream" command
+ * Client requests to close a stream
+ */
+async function handleCloseStreamCommand(
+    conn: Deno.TcpConn,
+): Promise<void> {
+    console.log("Handling closeStream command");
+
+    // For now, we'll just log it. In a real implementation, you'd clean up resources.
+    console.log("Stream closed");
+}
+
+/**
+ * Handle "releaseStream" command
+ * Client releases a publishing stream name
+ */
+async function handleReleaseStreamCommand(
+    conn: Deno.TcpConn,
+    transactionId: number,
+    streamName: string,
+): Promise<void> {
+    console.log(`Handling releaseStream command for stream: ${streamName}`);
+
+    // Send a _result command
+    await sendCommandAMF0(conn, "_result", transactionId, null, null);
+
+    console.log(`Stream ${streamName} released`);
+}
+
+/**
+ * Handle "FCPublish" command
+ * Client sends this before publishing
+ */
+async function handleFCPublishCommand(
+    conn: Deno.TcpConn,
+    transactionId: number,
+    streamName: string,
+): Promise<void> {
+    console.log(`Handling FCPublish command for stream: ${streamName}`);
+
+    // Send a _result command
+    await sendCommandAMF0(conn, "_result", transactionId, null, null);
+
+    console.log(`FCPublish for stream ${streamName} acknowledged`);
+}
+
+/**
+ * Handle "publish" command
+ * Client requests to publish a stream
+ */
+async function handlePublishCommand(
+    conn: Deno.TcpConn,
+    transactionId: number,
+    streamName: string,
+    publishType: string,
+): Promise<void> {
+    console.log(
+        `Handling publish command for stream: ${streamName}, type: ${publishType}`,
+    );
+
+    // Import AMF0 encoding utilities
+
+    try {
+        // Send Stream Begin user control message
+        await sendStreamBegin(conn, 1);
+
+        // Send onStatus command for NetStream.Publish.Start
+        const infoObj = {
+            level: "status",
+            code: "NetStream.Publish.Start",
+            description: `Started publishing ${streamName}.`,
+            details: streamName,
+        };
+
+        await sendCommandAMF0(conn, "onStatus", 0, null, infoObj);
+
+        console.log(`Publish command response sent for stream: ${streamName}`);
+    } catch (error) {
+        console.error("Error handling publish command:", error);
+    }
+}
+
+/**
+ * Send an AMF0 command
+ */
+async function sendCommandAMF0(
+    conn: Deno.TcpConn,
+    commandName: string,
+    transactionId: number,
+    commandObject: Record<string, any> | null,
+    ...additionalParams: any[]
+): Promise<void> {
+    // Import AMF0 encoding utilities
+
+    // Encode the command
+    const payload = encodeAMF0Command(
+        commandName,
+        transactionId,
+        commandObject,
+        ...additionalParams,
+    );
+
+    // Send the command message using the chunk utility
+    await sendMessage(
+        conn,
+        { type: MessageType.COMMAND_AMF0, payload },
+        3, // Chunk stream ID 3 for commands
+        1, // Message stream ID 1
+        4096, // Larger chunk size for commands
+    );
+
+    console.log(
+        `Sent command: ${commandName}, TransactionID: ${transactionId}`,
+    );
 }
 
 /**
