@@ -29,6 +29,8 @@ export async function* messagesFromChunks(chunks: AsyncIterable<Chunk>) {
      * At the receiver end, the chunks are assembled into messages
      * based on the chunk stream ID.
      */
+    console.log("[MESSAGES] Starting messagesFromChunks generator function");
+    console.log("[MESSAGES] Waiting for first chunk from client...");
     // Track message state for each chunk stream ID
     const messageStreams = new Map<number, {
         messageHeader?: MessageHeader;
@@ -44,21 +46,40 @@ export async function* messagesFromChunks(chunks: AsyncIterable<Chunk>) {
             "chunk data:",
             chunk.data?.length,
         );
+        console.log(
+            `[MESSAGES] Processing chunk for stream ID: ${chunk.header.chunk_stream_id}, format: ${chunk.header.message_header.type}, data length: ${chunk.data.length}`,
+        );
 
         const chunkStreamId = chunk.header.chunk_stream_id;
 
         // Get or create message stream tracking object
         let messageStream = messageStreams.get(chunkStreamId);
+        console.log(
+            `[MESSAGES] Stream ${chunkStreamId} state: ${
+                messageStream
+                    ? `Existing (collected ${messageStream.collectedLength}/${messageStream.totalLength})`
+                    : "New"
+            }`,
+        );
 
         // Process based on chunk format type
         if (chunk.header.message_header.type === FMT.Type0) {
             // Type 0 chunks start new messages
             const header = chunk.header.message_header;
+            console.log(
+                `[MESSAGES] Type0 chunk with msg type ID: ${header.message_type_id}, length: ${header.message_length}, timestamp: ${header.timestamp}`,
+            );
 
             // If we have a pending message, we should yield it first (this shouldn't happen with proper chunking)
             if (messageStream && messageStream.collectedLength > 0) {
+                console.log(
+                    `[MESSAGES] Found incomplete message in stream ${chunkStreamId}, assembling before starting new message`,
+                );
                 const message = assembleMessage(messageStream);
                 if (message) {
+                    console.log(
+                        `[MESSAGES] Yielding incomplete message type ${message.header.type} with length ${message.payload.length}`,
+                    );
                     yield message;
                 }
             }
@@ -75,6 +96,9 @@ export async function* messagesFromChunks(chunks: AsyncIterable<Chunk>) {
                 collectedLength: 0,
                 chunks: [],
             };
+            console.log(
+                `[MESSAGES] Starting new message for stream ${chunkStreamId}: type=${header.message_type_id}, length=${header.message_length}`,
+            );
             messageStreams.set(chunkStreamId, messageStream);
         } else if (!messageStream) {
             // For non-Type0 chunks, we should already have a message stream
@@ -82,17 +106,29 @@ export async function* messagesFromChunks(chunks: AsyncIterable<Chunk>) {
                 "Received non-Type0 chunk without prior Type0 chunk for stream:",
                 chunkStreamId,
             );
+            console.log(
+                `[MESSAGES] ERROR: Received ${chunk.header.message_header.type} chunk without prior Type0 chunk for stream ${chunkStreamId}`,
+            );
             continue;
         }
 
         // Add chunk to the current message stream
         messageStream.chunks.push(chunk);
         messageStream.collectedLength += chunk.data.length;
+        console.log(
+            `[MESSAGES] Added chunk to stream ${chunkStreamId}: ${chunk.data.length} bytes, now collected ${messageStream.collectedLength}/${messageStream.totalLength}`,
+        );
 
         // Check if we've collected a complete message
         if (messageStream.collectedLength >= messageStream.totalLength) {
+            console.log(
+                `[MESSAGES] Message complete for stream ${chunkStreamId}, assembling message`,
+            );
             const message = assembleMessage(messageStream);
             if (message) {
+                console.log(
+                    `[MESSAGES] Yielding complete message: type=${message.header.type}, length=${message.payload.length}`,
+                );
                 yield message;
             }
 
@@ -103,8 +139,16 @@ export async function* messagesFromChunks(chunks: AsyncIterable<Chunk>) {
                 collectedLength: 0,
                 chunks: [],
             });
+            console.log(
+                `[MESSAGES] Reset stream ${chunkStreamId} for next message`,
+            );
+        } else {
+            console.log(
+                `[MESSAGES] Message for stream ${chunkStreamId} still incomplete: ${messageStream.collectedLength}/${messageStream.totalLength}`,
+            );
         }
     }
+    console.log("[MESSAGES] Exiting messagesFromChunks generator");
 }
 
 function assembleMessage(messageStream: {
@@ -113,6 +157,9 @@ function assembleMessage(messageStream: {
     collectedLength: number;
     chunks: Chunk[];
 }): Message | null {
+    console.log(
+        `[ASSEMBLE] Starting to assemble message of length ${messageStream.totalLength} from ${messageStream.chunks.length} chunks`,
+    );
     if (!messageStream.messageHeader) {
         console.error("Cannot assemble message without a header");
         return null;
@@ -128,10 +175,16 @@ function assembleMessage(messageStream: {
             chunk.data.length,
             messageStream.totalLength - offset,
         );
+        console.log(
+            `[ASSEMBLE] Adding ${dataToWrite} bytes from chunk to position ${offset}`,
+        );
         payload.set(chunk.data.subarray(0, dataToWrite), offset);
         offset += dataToWrite;
 
         if (offset >= messageStream.totalLength) {
+            console.log(
+                `[ASSEMBLE] Reached total length (${offset}/${messageStream.totalLength}), stopping`,
+            );
             break;
         }
     }
@@ -140,8 +193,14 @@ function assembleMessage(messageStream: {
         console.warn(
             `Payload size mismatch: expected ${messageStream.totalLength}, got ${offset}`,
         );
+        console.log(
+            `[ASSEMBLE] WARNING: Payload size mismatch: expected ${messageStream.totalLength}, got ${offset}`,
+        );
     }
 
+    console.log(
+        `[ASSEMBLE] Message assembled successfully: type=${messageStream.messageHeader.type}, length=${payload.length}`,
+    );
     return {
         header: messageStream.messageHeader,
         payload,
@@ -189,11 +248,16 @@ export async function handleMessage(
     conn: Deno.TcpConn,
     message: Message,
     chunkSizeRef: { value: number },
-): Promise<void> {
-    console.log(`Handling message type: ${message.header.type}`);
+) {
+    console.log("Handling message type:", message.header.type);
+    console.log(
+        `[HANDLER] Processing message: type=${message.header.type}, length=${message.payload.length}, timestamp=${message.header.timestamp}`,
+    );
 
+    // Handle the message based on its type
     switch (message.header.type) {
         case MessageType.SET_CHUNK_SIZE:
+            console.log(`[HANDLER] Delegating to SET_CHUNK_SIZE handler`);
             handleSetChunkSize(message, chunkSizeRef);
             break;
 
@@ -239,7 +303,6 @@ export async function handleMessage(
             console.warn(`Unhandled message type: ${message.header.type}`);
     }
 }
-
 /**
  * Handles Set Chunk Size message (type 1)
  * Updates the chunk size for reading subsequent chunks
@@ -282,7 +345,9 @@ function handleAbortMessage(message: Message): void {
         (message.payload[2] << 8) |
         message.payload[3];
 
-    console.log(`Abort message received for chunk stream ID: ${chunkStreamId}`);
+    console.log(
+        `Abort message received for chunk stream ID: ${chunkStreamId}`,
+    );
     // Here you would discard any partially received message with this chunk stream ID
 }
 
@@ -335,9 +400,14 @@ function handleWindowAcknowledgementSize(
  * Handles Set Peer Bandwidth message (type 6)
  * Sets the bandwidth limit for the connection
  */
-function handleSetPeerBandwidth(message: Message, conn: Deno.TcpConn): void {
+function handleSetPeerBandwidth(
+    message: Message,
+    conn: Deno.TcpConn,
+): void {
     if (message.payload.length < 5) {
-        console.error("Invalid Set Peer Bandwidth message: payload too short");
+        console.error(
+            "Invalid Set Peer Bandwidth message: payload too short",
+        );
         return;
     }
 
@@ -348,7 +418,9 @@ function handleSetPeerBandwidth(message: Message, conn: Deno.TcpConn): void {
 
     const limitType = message.payload[4];
 
-    console.log(`Set Peer Bandwidth: size=${windowSize}, type=${limitType}`);
+    console.log(
+        `Set Peer Bandwidth: size=${windowSize}, type=${limitType}`,
+    );
 
     // Respond with a Window Acknowledgement Size message
     sendWindowAcknowledgementSize(conn, windowSize);
@@ -397,7 +469,9 @@ async function sendSetPeerBandwidth(
     // Send the message using the chunk utility
     await sendControlMessage(conn, MessageType.SET_PEER_BANDWIDTH, payload);
 
-    console.log(`Sent Set Peer Bandwidth: ${windowSize}, type: ${limitType}`);
+    console.log(
+        `Sent Set Peer Bandwidth: ${windowSize}, type: ${limitType}`,
+    );
 }
 
 /**
@@ -427,7 +501,10 @@ async function sendStreamBegin(
  * Handles User Control Message (type 4)
  * Contains various event types
  */
-function handleUserControlMessage(message: Message, conn: Deno.TcpConn): void {
+function handleUserControlMessage(
+    message: Message,
+    conn: Deno.TcpConn,
+): void {
     if (message.payload.length < 2) {
         console.error("Invalid User Control message: payload too short");
         return;
@@ -585,6 +662,14 @@ async function handleConnectCommand(
     commandObject: Record<string, any>,
 ): Promise<void> {
     console.log("Handling connect command");
+    console.log(
+        `[CONNECT] Processing connect command with transaction ID: ${transactionId}`,
+    );
+    console.log(
+        `[CONNECT] Command object details: ${
+            JSON.stringify(commandObject, null, 2)
+        }`,
+    );
 
     // Send Window Acknowledgement Size
     await sendWindowAcknowledgementSize(conn, 2500000);
@@ -640,7 +725,13 @@ async function handleCreateStreamCommand(
         // For simplicity, we'll use stream ID 1
         const streamId = 1;
 
-        await sendCommandAMF0(conn, "_result", transactionId, null, streamId);
+        await sendCommandAMF0(
+            conn,
+            "_result",
+            transactionId,
+            null,
+            streamId,
+        );
 
         console.log(
             `CreateStream command response sent with stream ID: ${streamId}`,
@@ -777,7 +868,9 @@ async function handlePublishCommand(
 
         await sendCommandAMF0(conn, "onStatus", 0, null, infoObj);
 
-        console.log(`Publish command response sent for stream: ${streamName}`);
+        console.log(
+            `Publish command response sent for stream: ${streamName}`,
+        );
     } catch (error) {
         console.error("Error handling publish command:", error);
     }

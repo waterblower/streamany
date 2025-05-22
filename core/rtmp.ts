@@ -71,9 +71,16 @@ for await (const conn of listener) {
     const s1_random = new Uint8Array(1528);
     crypto.getRandomValues(s1_random);
 
+    console.log(
+        `[HANDSHAKE] Sending S1 - Time: ${
+            Array.from(s1_time).map((b) => b.toString(16).padStart(2, "0"))
+                .join(" ")
+        }`,
+    );
     await conn.write(s1_time);
     await conn.write(s1_zero);
     await conn.write(s1_random);
+    console.log(`[HANDSHAKE] S1 sent (${4 + 4 + 1528} bytes)`);
 
     /**
     read c1 https://rtmp.veriskope.com/docs/spec/#523c1-and-s1-format
@@ -101,10 +108,12 @@ for await (const conn of listener) {
     }
 
     // send s2
+    console.log(`[HANDSHAKE] Sending S2 (echoing C1 data)`);
     await conn.write(c1_time);
     await conn.write(c1_time);
     await conn.write(c1_randome);
     console.log("Ack Sent");
+    console.log(`[HANDSHAKE] S2 sent (${4 + 4 + 1528} bytes)`);
 
     /**
     read c2 https://rtmp.veriskope.com/docs/spec/#524-c2-and-s2-format
@@ -121,6 +130,7 @@ for await (const conn of listener) {
 
     console.log("Handshake Done");
 
+    console.log("[CONNECTION] Starting to process chunks after handshake");
     const chunks = chunkStream(conn, chunkSizeRef);
     for await (const message of messagesFromChunks(chunks)) {
         console.log(
@@ -148,6 +158,8 @@ async function readChunk(
 ): Promise<Chunk | null> {
     try {
         console.log("readChunk: begin");
+        console.log(`[CHUNK] Current chunk size: ${chunkSizeRef.value}`);
+        console.log(`[CHUNK] Active chunk streams: ${chunkStreamStates.size}`);
         const chunk_header = await readChunkHeader(conn);
         console.log("readChunkHeader: Done");
 
@@ -197,17 +209,26 @@ async function readChunk(
         }
 
         // Read chunk data
+        console.log(
+            `[CHUNK] Reading chunk data, size to read: ${sizeToRead} (message length: ${
+                state?.messageLength || "unknown"
+            })`,
+        );
         const message = await read(conn, sizeToRead);
         if (message == null) {
             console.warn("readChunk: no chunk data");
             return null;
         }
+        console.log(
+            `[CHUNK] Successfully read chunk data, received ${message.length} bytes`,
+        );
 
         // For Type 1-3, enhance the header with the stored state
         if (chunk_header.message_header.type !== FMT.Type0 && state) {
             chunk_header.message_header.message_length = state.messageLength;
             chunk_header.message_header.message_type_id = state.messageTypeId;
-            chunk_header.message_header.message_stream_id = state.messageStreamId;
+            chunk_header.message_header.message_stream_id =
+                state.messageStreamId;
         }
 
         return {
@@ -289,10 +310,21 @@ async function readChunkHeader(conn: Deno.TcpConn): Promise<ChunkHeader> {
  * https://rtmp.veriskope.com/docs/spec/#5311-chunk-basic-header
  */
 async function readBasicHeader(conn: Deno.TcpConn) {
+    console.log("readBasicHeader: start");
+    console.log("[BASIC_HEADER] Attempting to read first byte...");
     const header_1 = await read(conn, 1);
     if (header_1 == null) {
+        console.log(
+            "[BASIC_HEADER] Failed to read first byte, connection may be closed",
+        );
         return new Error("Failed to read basic header first byte");
     }
+    console.log("readBasicHeader: 1st byte is", header_1);
+    console.log(
+        `[BASIC_HEADER] First byte hex: 0x${
+            header_1[0].toString(16)
+        }, binary: ${header_1[0].toString(2).padStart(8, "0")}`,
+    );
 
     // Extract the format from the first 2 bits (upper 2 bits)
     const fmt: FMT = header_1[0] >> 6;
@@ -332,15 +364,14 @@ async function readMessageHeader(conn: Deno.TcpConn, fmt: FMT) {
      * https://rtmp.veriskope.com/docs/spec/#5312-chunk-message-header
      */
     let message_header: MessageHeader;
-
+    console.log("readMessageHeader: fmt", fmt);
+    console.log(`[MESSAGE_HEADER] Reading header for format type ${fmt}`);
     if (fmt == FMT.Type0) {
-        console.log("fmt", fmt);
         const header = await read(conn, 11);
         if (header == null) {
             return new Error("Failed to read Type0 message header");
         }
 
-        console.log("!");
         const timestamp = header.slice(0, 3);
         const message_len = header.slice(3, 6);
         const message_type_id = header.slice(6, 7);
@@ -389,11 +420,17 @@ async function readMessageHeader(conn: Deno.TcpConn, fmt: FMT) {
 }
 
 async function read(conn: Deno.TcpConn, size: number) {
+    console.log(`[READ] Attempting to read ${size} bytes...`);
     const buf = new Uint8Array(size);
+    console.log(`[READ] Waiting for connection.read() to return...`);
     const read_n = await conn.read(buf);
     if (read_n == null) {
+        console.log(`[READ] Read returned null, connection likely closed`);
         return null;
     }
+    console.log(
+        `[READ] Successfully read ${read_n} bytes of ${size} requested`,
+    );
     return buf.slice(0, read_n);
 }
 
