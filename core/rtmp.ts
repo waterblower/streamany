@@ -192,9 +192,12 @@ async function readChunkHeader(conn: Deno.TcpConn): Promise<ChunkHeader> {
     Chunking https://rtmp.veriskope.com/docs/spec/#531chunk-format
     */
     // read Chunk Basic Header
-    const { fmt, chunk_stream_id } = await readBasicHeader(conn);
+    const basic_header = await readBasicHeader(conn);
+    if (basic_header instanceof Error) throw basic_header;
     console.log("readBasicHeader: done");
+    const { fmt, chunk_stream_id } = basic_header;
     const message_header = await readMessageHeader(conn, fmt);
+    if (message_header instanceof Error) throw message_header;
     console.log("readMessageHeader: done");
 
     // https://rtmp.veriskope.com/docs/spec/#5313-extended-timestamp
@@ -213,37 +216,60 @@ async function readChunkHeader(conn: Deno.TcpConn): Promise<ChunkHeader> {
     };
 }
 
+/**
+ * https://rtmp.veriskope.com/docs/spec/#5311-chunk-basic-header
+ */
 async function readBasicHeader(conn: Deno.TcpConn) {
     const header_1 = await read(conn, 1);
     if (header_1 == null) {
-        throw "";
+        return new Error("Failed to read basic header first byte");
     }
-    // console.log(byteToBinaryString(header_1[0]));
 
-    let chunk_stream_id = header_1[0];
-
+    // Extract the format from the first 2 bits (upper 2 bits)
     const fmt: FMT = header_1[0] >> 6;
-    console.log("fmt is", fmt, header_1[0]);
-    if (header_1[0] == 0) { // 2 bytes
-    } else if (header_1[0] == 1) { // 3 bytes
-    } else { // 1 byte
-        chunk_stream_id = header_1[0] & 0b0011_1111;
+
+    // Extract the chunk stream ID using the format type
+    let chunk_stream_id: number;
+
+    // The lower 6 bits of the first byte represent the chunk stream ID
+    const first_byte_csid = header_1[0] & 0b0011_1111;
+
+    if (first_byte_csid === 0) {
+        // 2 bytes - csid range from 64-319
+        const second_byte = await read(conn, 1);
+        if (second_byte === null) {
+            return new Error("Failed to read basic header second byte");
+        }
+        chunk_stream_id = second_byte[0] + 64;
+    } else if (first_byte_csid === 1) {
+        // 3 bytes - csid range from 64-65599
+        const extra_bytes = await read(conn, 2);
+        if (extra_bytes === null) {
+            return new Error("Failed to read basic header extra bytes");
+        }
+        chunk_stream_id = extra_bytes[0] + (extra_bytes[1] << 8) + 64;
+    } else {
+        // 1 byte - csid range from 2-63
+        chunk_stream_id = first_byte_csid;
     }
+
     console.log("fmt:", fmt, "chunk_stream_id:", chunk_stream_id);
     return { fmt, chunk_stream_id };
 }
 
 async function readMessageHeader(conn: Deno.TcpConn, fmt: FMT) {
     /**
-        read Chunk Message Header
-        https://rtmp.veriskope.com/docs/spec/#5312-chunk-message-header
-        */
+     * Read Chunk Message Header
+     * https://rtmp.veriskope.com/docs/spec/#5312-chunk-message-header
+     */
     let message_header: MessageHeader;
-    let timestamp: Uint8Array = new Uint8Array([0xff, 0xff, 0xff]);
+
     if (fmt == FMT.Type0) {
         console.log("fmt", fmt);
         const header = await read(conn, 11);
-        if (header == null) throw "";
+        if (header == null) {
+            return new Error("Failed to read Type0 message header");
+        }
 
         console.log("!");
         const timestamp = header.slice(0, 3);
@@ -260,10 +286,14 @@ async function readMessageHeader(conn: Deno.TcpConn, fmt: FMT) {
         };
     } else if (fmt == FMT.Type1) {
         const header = await read(conn, 7);
-        if (header == null) throw "";
-        timestamp = header.slice(0, 3);
+        if (header == null) {
+            return new Error("Failed to read Type1 message header");
+        }
+
+        const timestamp = header.slice(0, 3);
         const message_len = header.slice(3, 6);
         const message_type_id = header.slice(6, 7);
+
         message_header = {
             type: fmt,
             timestamp: byte_3_to_number(timestamp),
@@ -271,12 +301,14 @@ async function readMessageHeader(conn: Deno.TcpConn, fmt: FMT) {
             message_type_id: message_type_id[0],
         };
     } else if (fmt == FMT.Type2) {
-        const header = await read(conn, 7);
-        if (header == null) throw "";
-        timestamp = header.slice(0, 3);
+        const header = await read(conn, 3); // Just read the timestamp delta for Type2
+        if (header == null) {
+            return new Error("Failed to read Type2 message header");
+        }
+
         message_header = {
             type: fmt,
-            timestamp: byte_3_to_number(timestamp),
+            timestamp: byte_3_to_number(header),
         };
     } else {
         message_header = {

@@ -115,7 +115,7 @@ export async function sendChunk(
             messageHeader[8] = (messageStreamId >> 8) & 0xFF;
             messageHeader[9] = (messageStreamId >> 16) & 0xFF;
             messageHeader[10] = (messageStreamId >> 24) & 0xFF;
-            console.log(1234)
+            console.log(1234);
             break;
 
         case FMT.Type1:
