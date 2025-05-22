@@ -2,8 +2,8 @@ rtmp:
 	deno run --allow-net core/rtmp.ts
 
 test:
-	./assets/ffmpeg-mac -loglevel verbose -re -i assets/test2.mp4 \
-	    -c copy -f mp4 rtmp://localhost:1935
+	./assets/ffmpeg-mac -loglevel trace -re -i assets/test2.mp4 \
+	    -c copy -f flv rtmp://localhost:1935/live/abc
 
 build:
 	deno compile \
