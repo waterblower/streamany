@@ -1,26 +1,14 @@
-// Copyright 2023, Modified version of pullrtmp2pushrtmp
-// https://github.com/q191201771/lal
-//
-// Use of this source code is governed by a MIT-style license
-// that can be found in the License file.
-
-package main
+package liveagent
 
 import (
-	"flag"
-	"fmt"
-	"os"
-	"strings"
-	"time"
-
 	"github.com/q191201771/lal/pkg/base"
 	"github.com/q191201771/lal/pkg/rtmp"
 	"github.com/q191201771/naza/pkg/nazalog"
 )
 
 type RelayServer struct {
-	server       *rtmp.Server
-	pushSessions map[string][]*rtmp.PushSession
+	Server       *rtmp.Server
+	PushSessions map[string][]*rtmp.PushSession
 	listenAddr   string
 	destUrls     map[string][]string // streamName -> destination URLs
 	onPublish    func(session *rtmp.ServerSession) error
@@ -29,11 +17,11 @@ type RelayServer struct {
 func NewRelayServer(listenAddr string) *RelayServer {
 	rs := &RelayServer{
 		listenAddr:   listenAddr,
-		pushSessions: make(map[string][]*rtmp.PushSession),
+		PushSessions: make(map[string][]*rtmp.PushSession),
 		destUrls:     make(map[string][]string),
 	}
 
-	rs.server = rtmp.NewServer(listenAddr, rs)
+	rs.Server = rtmp.NewServer(listenAddr, rs)
 	return rs
 }
 
@@ -44,14 +32,14 @@ func (rs *RelayServer) AddDestination(streamName string, destUrls []string) {
 
 // Start starts the relay server
 func (rs *RelayServer) Start() error {
-	if err := rs.server.Listen(); err != nil {
+	if err := rs.Server.Listen(); err != nil {
 		return err
 	}
 
 	nazalog.Infof("RTMP relay server listening on %s", rs.listenAddr)
 
 	// Run in blocking mode
-	return rs.server.RunLoop()
+	return rs.Server.RunLoop()
 }
 
 // IServerObserver interface implementation
@@ -89,12 +77,12 @@ func (rs *RelayServer) OnDelRtmpPubSession(session *rtmp.ServerSession) {
 
 	// Clean up push sessions for this stream
 	streamName := session.StreamName()
-	if sessions, ok := rs.pushSessions[streamName]; ok {
+	if sessions, ok := rs.PushSessions[streamName]; ok {
 		for _, pushSession := range sessions {
 			nazalog.Infof("[%s] Disposing push session %s", session.UniqueKey(), pushSession.UniqueKey())
 			pushSession.Dispose()
 		}
-		delete(rs.pushSessions, streamName)
+		delete(rs.PushSessions, streamName)
 	}
 }
 
@@ -124,7 +112,7 @@ func (o *RelayObserver) OnReadRtmpAvMsg(msg base.RtmpMsg) {
 	}
 
 	// Relay the message to all push sessions
-	if sessions, ok := o.rs.pushSessions[o.streamName]; ok {
+	if sessions, ok := o.rs.PushSessions[o.streamName]; ok {
 		for _, pushSession := range sessions {
 			pushSession.WriteMsg(msg)
 		}
@@ -135,7 +123,7 @@ func (o *RelayObserver) startPushSessions() {
 	nazalog.Infof("[%s] Starting push sessions for stream %s to %d destinations",
 		o.session.UniqueKey(), o.streamName, len(o.destUrls))
 
-	pushSessions := make([]*rtmp.PushSession, 0, len(o.destUrls))
+	PushSessions := make([]*rtmp.PushSession, 0, len(o.destUrls))
 
 	for _, destUrl := range o.destUrls {
 		pushSession := rtmp.NewPushSession(func(option *rtmp.PushSessionOption) {
@@ -157,53 +145,9 @@ func (o *RelayObserver) startPushSessions() {
 				o.session.UniqueKey(), url, err)
 		}(pushSession, destUrl)
 
-		pushSessions = append(pushSessions, pushSession)
+		PushSessions = append(PushSessions, pushSession)
 	}
 
 	// Store push sessions for this stream
-	o.rs.pushSessions[o.streamName] = pushSessions
-}
-
-func main() {
-	_ = nazalog.Init(func(option *nazalog.Option) {
-		option.AssertBehavior = nazalog.AssertFatal
-	})
-	defer nazalog.Sync()
-	base.LogoutStartInfo()
-
-	listen := flag.String("l", "0.0.0.0:1935", "specify RTMP listening address")
-	o := flag.String("o", "", "specify push rtmp url list, separated by a comma")
-	s := flag.String("s", "*", "specify stream name to relay (default: * for all streams)")
-	flag.Parse()
-
-	if *o == "" {
-		flag.Usage()
-		_, _ = fmt.Fprintf(os.Stderr, `Example:
-  %s -l 0.0.0.0:1935 -o rtmp://dest1.example.com/live/stream,rtmp://dest2.example.com/live/stream
-  %s -l 0.0.0.0:1935 -o rtmp://dest1.example.com/live/stream -s mystream
-`, os.Args[0], os.Args[0])
-		base.OsExitAndWaitPressIfWindows(1)
-	}
-
-	destUrls := strings.Split(*o, ",")
-	for i := range destUrls {
-		destUrls[i] = strings.TrimSpace(destUrls[i])
-	}
-
-	// Create and configure the relay server
-	relay := NewRelayServer(*listen)
-
-	// Add destination URLs for the specified stream
-	relay.AddDestination(*s, destUrls)
-
-	// Start the relay server
-	nazalog.Infof("Starting RTMP relay server. Listening on %s, relaying to %d destinations", *listen, len(destUrls))
-	err := relay.Start()
-	if err != nil {
-		nazalog.Errorf("Failed to start relay server: %v", err)
-		base.OsExitAndWaitPressIfWindows(1)
-	}
-
-	// This is a blocking call, but adding a sleep to make sure everything shuts down cleanly
-	time.Sleep(1 * time.Second)
+	o.rs.PushSessions[o.streamName] = PushSessions
 }

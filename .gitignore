@@ -3,3 +3,4 @@ build
 _.*
 .DS_Store
 lal
+*.app
